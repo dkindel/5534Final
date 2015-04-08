@@ -39,6 +39,7 @@ typedef struct CoKernel {
 
 Func buildFunc(char*);
 void printFunc(Func* f);
+void printSingleFunc(SFunc *sf);
 void rKernel(SFunc *sf, Kernel *k, int kCount);
 void rKernel_allFuncs(Func *f);
 
@@ -54,7 +55,7 @@ int main(int argc, char *argv[]){
     strcpy(espName, argv[1]);
     Func f = buildFunc(espName);
     printFunc(&f);
-    //RKernel_allFuncs(f);
+    rKernel_allFuncs(&f);
     return EXIT_SUCCESS;
 }
 
@@ -163,7 +164,7 @@ void rKernel_allFuncs(Func *f){
 
 //recursive function to find the kernels
 void rKernel(SFunc *sf, Kernel *k, int kCount){
-    
+    printSingleFunc(sf);
 }
 
 //////////////////
@@ -174,7 +175,7 @@ void rKernel(SFunc *sf, Kernel *k, int kCount){
 
 void printFunc(Func* f){
     int i, j, k;
-    for(i = 0; i < f-> numout; i++){
+    for(i = 0; i < f->numout; i++){
         printf("F_%d = ", i);
         for(j = 0; j < f->singleFuncs[i].cubeCount; j++){
             for(k = 0; k < MAXCUBES; k++){
@@ -190,4 +191,18 @@ void printFunc(Func* f){
     }
 }
 
-
+void printSingleFunc(SFunc *sf){
+    int i, j;
+    printf("F = ");
+    for(i = 0; i < sf->cubeCount; i++){
+        for(j = 0; j < MAXCUBES; j++){
+            if(sf->cubes[i][j] == V_1){
+                printf("%c", intToChar(j));
+            }
+        }
+        if(sf->cubeCount != i+1){
+            printf(" + ");
+        }
+    }
+    printf("\n");
+}
