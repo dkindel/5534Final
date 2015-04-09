@@ -56,6 +56,7 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns);
 void rKernel_allFuncs(Func *f);
 int  getCubesWithLiteral(SFunc *sf, int** cubes, int literal);
 int findLargestSubset(int** cubes, int numCubes, int* subset);
+int subtractCubes(int* cube1, int* cube2, int* result);
 
 
 
@@ -76,6 +77,19 @@ int main(int argc, char *argv[]){
 //loads the values from the .esp file
 Func buildFunc(char* espName){
     Func f;
+    //initialize func f
+    int i;
+    for(i = 0; i < MAXFUNCS; i++){
+        SFunc *sf = &f.singleFuncs[i];
+        int j,k;
+        for(j = 0; j < MAXCUBES; j++){
+            for(k = 0; k < MAXLITERALS; k++){
+                sf->cubes[j][k] = 0;
+            }
+        }
+        sf->numin = 0;
+        sf->cubeCount = 0;
+    }
     FILE *inFile;
     char fName[40];
 
@@ -89,7 +103,6 @@ Func buildFunc(char* espName){
 
     f.numin = 0;
     f.numout = 0;
-    int i;
     for(i = 0; i < MAXFUNCS; i++){
         f.singleFuncs[i].cubeCount = 0; //keeps track of the number of cubes currently in the equation
     }
@@ -190,8 +203,6 @@ void rKernel_allFuncs(Func *f){
 #endif
         free(kerns);
         free(cokerns);
-        //kerns = NULL;
-        //cokerns = NULL;
     }
 }
 
@@ -222,9 +233,16 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
 #ifdef DEBUG
             printf("\t\tLargest subset (i.e. cokernel): ");
             printCube(cokernAddr);
-            //printCube(subset);
             printf("\n");
 #endif
+            printf("kerncubes: ");
+            for(j = 0; j < numCubes; j++){
+                int *kernelCube = (int*)malloc(MAXLITERALS * sizeof(int));
+                subtractCubes(cubes[j], cokernAddr, kernelCube);
+                printCube(kernelCube);
+                printf(" + ");
+            }
+            printf("\n");
         }
     }
 }
@@ -262,6 +280,21 @@ int getCubesWithLiteral(SFunc *sf, int** cubes, int literal){
 //////////////////
 //helper functions
 //////////////////
+
+//result = cube1-cube2
+//the number of values left in result is returned
+int subtractCubes(int* cube1, int* cube2, int* result){
+    int i, numVals = 0;
+    for(i = 0; i < MAXLITERALS; i++){
+        if(cube1[i] == V_1 && cube2[i] == V_0){
+            result[i] = V_1;
+            numVals++;
+        }
+    }
+    return numVals;
+}
+
+
 
 void copyCubes(int* src, int* dest){
     int i;
