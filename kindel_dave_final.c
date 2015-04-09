@@ -2,14 +2,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define DEBUG
 
 #define V_X 2
 #define V_1 1
 #define V_0 0
 
-#define MAXFUNCS 10
+#define MAXFUNCS 5
 #define MAXCUBES 50
-#define MAXLITERALS 100
+#define MAXLITERALS 50
 
 //this a single function
 typedef struct SFunc {
@@ -31,17 +32,30 @@ typedef struct Kernel {
     int cubeCount;
 } Kernel;
 
+typedef struct Kernels {
+    Kernel kern[100];
+    int kernCount;
+} Kernels;
+
 typedef struct CoKernel {
     int cubes[MAXLITERALS];
 } CoKernel;
 
+typedef struct CoKernels {
+    CoKernel cokern[100];
+    int cokernCount;
+} CoKernels;
 
 
 Func buildFunc(char*);
 void printFunc(Func* f);
 void printSingleFunc(SFunc *sf);
-void rKernel(SFunc *sf, Kernel *k, int kCount);
+void printCube(int* cube);
+void copyCubes(int* src, int* dest);
+void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns);
 void rKernel_allFuncs(Func *f);
+int  getCubesWithLiteral(SFunc *sf, int** cubes, int literal);
+int findLargestSubset(int** cubes, int numCubes, int* subset);
 
 
 
@@ -142,7 +156,7 @@ Func buildFunc(char* espName){
         else if(line[1] == 'e'){
             break;
         }
-        
+
     }
     fclose(inFile);
     return f;
@@ -153,23 +167,108 @@ Func buildFunc(char* espName){
 //this one at a time)
 void rKernel_allFuncs(Func *f){
     int i;
+    Kernels *kerns = NULL;
+    CoKernels *cokerns = NULL;
     for(i = 0; i < f->numout; i++){
-        Kernel k[100];
-        int kernelCount = 0;
+        //I can't just malloc or work on the stack because c hates me
+        kerns = (Kernels *) calloc(1, sizeof(Kernels));
+        cokerns = (CoKernels *) calloc(1,sizeof(CoKernels));
         SFunc sf = f->singleFuncs[i];
         sf.numin = f->numin;
-        rKernel(&sf, k, kernelCount);
+#ifdef DEBUG
+        printf("For function %d: \n", i);
+#endif
+        rKernel(&sf, kerns, cokerns);
+#ifdef DEBUG
+        int j;
+        printf("\tCokernels: \n");
+        for(j = 0; j < cokerns->cokernCount; j++){
+            printf("\t\tCoKernel %d: ", j);
+            printCube(cokerns->cokern[j].cubes);
+            printf("\n");
+        }
+#endif
+        free(kerns);
+        free(cokerns);
+        //kerns = NULL;
+        //cokerns = NULL;
     }
 }
 
 //recursive function to find the kernels
-void rKernel(SFunc *sf, Kernel *k, int kCount){
-    printSingleFunc(sf);
+void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
+    int i, j;
+    for(i = 0; i < sf->numin; i++){ //i is the current literal 
+        int** cubes = malloc(MAXCUBES * sizeof(int*));
+        for(j = 0; j < MAXCUBES; j++){
+            cubes[j] = (int*) malloc(MAXLITERALS * sizeof(int));
+        }
+        int numCubes = getCubesWithLiteral(sf, cubes, i);
+#ifdef DEBUG
+        printf("\tLiteral %d: ", i);
+        for(j = 0; j < numCubes; j++){
+            printCube(cubes[j]);
+            printf(", ");
+        }
+        printf("\n");
+#endif
+        if(numCubes >= 2){ //if inside this loop, we know there's at least a 1 literal co-kernel (the literal itself)
+            int* subset = malloc(MAXLITERALS * sizeof(int));
+            findLargestSubset(cubes, numCubes, subset);
+            //the largest subset is a cokernel, add it as such
+            int* cokernAddr = cokerns->cokern[cokerns->cokernCount].cubes;
+            copyCubes(subset, cokernAddr);
+            cokerns->cokernCount = cokerns->cokernCount + 1;
+#ifdef DEBUG
+            printf("\t\tLargest subset (i.e. cokernel): ");
+            printCube(cokernAddr);
+            //printCube(subset);
+            printf("\n");
+#endif
+        }
+    }
 }
 
+//fills the largest subset into subset and returns the number of elements that were added
+int findLargestSubset(int** cubes, int numCubes, int* subset){
+    int i, j;
+    for(j = 0; j < MAXLITERALS; j++){
+        subset[j] = 1; //initialize to 1
+    }
+    int numLiterals = 0; //the number of literals in the largest subset
+    for(i = 0; i < numCubes; i++){
+        for(j = 0; j < MAXLITERALS; j++){
+            subset[j] = subset[j] & cubes[i][j];
+            numLiterals += subset[j];
+        }
+    }
+    return numLiterals;
+}
+
+//gets the cubes with the literal inside
+//fills the cube itself into the cubes param and returns the number cubes that have been added
+int getCubesWithLiteral(SFunc *sf, int** cubes, int literal){
+    int cubeCount = 0; //cubeCount is the running number of cubes being added that have the literal in it
+    int i, j;
+    for(i = 0; i < sf->cubeCount; i++){ //loop through all the cubes
+        for(j = 0; j < MAXLITERALS; j++){ //compare all literals
+            if(literal == j && sf->cubes[i][j] == V_1){
+                cubes[cubeCount++] = sf->cubes[i]; //add the cube to the list and increment the cubeCount
+            }
+        }
+    }
+    return cubeCount;
+}
 //////////////////
 //helper functions
 //////////////////
+
+void copyCubes(int* src, int* dest){
+    int i;
+    for(i = 0; i < MAXLITERALS; i++){
+        dest[i] = src[i];
+    }
+}
 
 #define intToChar(i) (char)(((int)'a')+i)
 
@@ -205,4 +304,13 @@ void printSingleFunc(SFunc *sf){
         }
     }
     printf("\n");
+}
+
+void printCube(int* cube){
+    int i;
+    for(i = 0; i < MAXLITERALS; i++){
+        if(cube[i] == V_1){
+            printf("%c", intToChar(i));
+        }
+    }
 }
