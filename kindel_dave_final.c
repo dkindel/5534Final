@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define DEBUG
+//#define DEBUG
 
 #define V_X 2
 #define V_1 1
@@ -148,8 +148,8 @@ Func buildFunc(char* espName){
     //second loop starts reading in data lines
     while(fgets(line, sizeof line, inFile) != NULL) {
         if(line[0] != '.'){
-            char *inputs = malloc(sizeof(char) * f.numin);
-            char *outputs = malloc(sizeof(char) * f.numout);
+            char *inputs = malloc(sizeof(char) * f.numin+1);
+            char *outputs = malloc(sizeof(char) * f.numout+1);
 
             sscanf(line, "%s %s", inputs, outputs);
 
@@ -189,10 +189,10 @@ Func buildFunc(char* espName){
 //this one at a time)
 void rKernel_allFuncs(Func *f){
     int i;
-    Kernels *kerns = NULL;
-    CoKernels *cokerns = NULL;
     for(i = 0; i < f->numout; i++){
         //I can't just malloc or work on the stack because c hates me
+        Kernels *kerns = NULL;
+        CoKernels *cokerns = NULL;
         kerns = (Kernels *) calloc(1, sizeof(Kernels));
         cokerns = (CoKernels *) calloc(1,sizeof(CoKernels));
         SFunc sf = f->singleFuncs[i];
@@ -219,6 +219,10 @@ void rKernel_allFuncs(Func *f){
     }
 }
 
+void *worker_thread(void *args){
+   return NULL; 
+}
+
 void logCoKernels(CoKernels *cokerns){
     printCoKernels(cokerns);
 }
@@ -229,8 +233,10 @@ void logKernels(Kernels *kerns){
 
 //recursive function to find the kernels
 void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
+#ifdef DEBUG
     printf("Finding kernels for: \n");
     printSingleFunc(sf);
+#endif
     int i, j;
     for(i = 0; i < sf->numin; i++){ //i is the current literal 
         int** cubes = malloc(MAXCUBES * sizeof(int*));
@@ -284,7 +290,7 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
                 copyKernToSF(&kerns->kern[kerns->kernCount-1], kernSF);
 
                 rKernel(kernSF, kerns, cokerns);
-                //free(kernSF);
+                free(kernSF);
             }
             free(subset);
         }
