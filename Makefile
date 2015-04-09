@@ -1,2 +1,2 @@
 all:
-	gcc kindel_dave_final.c -g -o final
+	gcc kindel_dave_final.c -Wall -Werror -g -o final
