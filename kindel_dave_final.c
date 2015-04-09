@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define DEBUG
+//#define DEBUG
 
 #define V_X 2
 #define V_1 1
@@ -57,7 +57,11 @@ void rKernel_allFuncs(Func *f);
 int  getCubesWithLiteral(SFunc *sf, int** cubes, int literal);
 int findLargestSubset(int** cubes, int numCubes, int* subset);
 int subtractCubes(int* cube1, int* cube2, int* result);
-
+void logKernels(Kernels *kerns);
+void logCoKernels(CoKernels *cokerns);
+void printKernels(Kernels *kerns);
+void printCoKernels(CoKernels *cokerns);
+void copyKernToSF(Kernel *kern, SFunc *sf);
 
 
 int main(int argc, char *argv[]){
@@ -69,7 +73,9 @@ int main(int argc, char *argv[]){
     }
     strcpy(espName, argv[1]);
     Func f = buildFunc(espName);
+#ifdef DEBUG
     printFunc(&f);
+#endif
     rKernel_allFuncs(&f);
     return EXIT_SUCCESS;
 }
@@ -188,9 +194,8 @@ void rKernel_allFuncs(Func *f){
         cokerns = (CoKernels *) calloc(1,sizeof(CoKernels));
         SFunc sf = f->singleFuncs[i];
         sf.numin = f->numin;
-#ifdef DEBUG
-        printf("For function %d: \n", i);
-#endif
+        printf("Function %d: \n", i);
+        
         rKernel(&sf, kerns, cokerns);
 #ifdef DEBUG
         int j;
@@ -201,9 +206,21 @@ void rKernel_allFuncs(Func *f){
             printf("\n");
         }
 #endif
+        //we now have the kernels and cokernels
+        logKernels(kerns);
+        logCoKernels(cokerns);
+
         free(kerns);
         free(cokerns);
     }
+}
+
+void logCoKernels(CoKernels *cokerns){
+    printCoKernels(cokerns);
+}
+
+void logKernels(Kernels *kerns){
+    printKernels(kerns);
 }
 
 //recursive function to find the kernels
@@ -215,6 +232,7 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
             cubes[j] = (int*) malloc(MAXLITERALS * sizeof(int));
         }
         int numCubes = getCubesWithLiteral(sf, cubes, i);
+        kerns->kern[kerns->kernCount].cubeCount = numCubes;
 #ifdef DEBUG
         printf("\tLiteral %d: ", i);
         for(j = 0; j < numCubes; j++){
@@ -234,16 +252,41 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
             printf("\t\tLargest subset (i.e. cokernel): ");
             printCube(cokernAddr);
             printf("\n");
+            printf("Adding kernel: ");
 #endif
-            printf("kerncubes: ");
             for(j = 0; j < numCubes; j++){
-                int *kernelCube = (int*)malloc(MAXLITERALS * sizeof(int));
-                subtractCubes(cubes[j], cokernAddr, kernelCube);
-                printCube(kernelCube);
-                printf(" + ");
+                int* kernAddr = kerns->kern[kerns->kernCount].cubes[j];
+                subtractCubes(cubes[j], cokernAddr, kernAddr);
+#ifdef DEBUG
+                printCube(kernAddr);
+                if(j != numCubes - 1){
+                    printf(" + ");
+                }
+#endif
             }
+#ifdef DEBUG
             printf("\n");
+#endif
+            kerns->kernCount = kerns->kernCount + 1;
+
+            //make it recursive here!
+            SFunc *kernSF = calloc(1, sizeof(SFunc));
+            kernSF->numin = sf->numin;
+            copyKernToSF(&kerns->kern[kerns->kernCount-1], kernSF);
+            
+            rKernel(kernSF, kerns, cokerns);
         }
+    }
+}
+
+
+//responsible for copying over the data from the kernel to the new single function
+//to be used recursively
+void copyKernToSF(Kernel *kern, SFunc *sf){
+    sf->cubeCount = kern->cubeCount;
+    int i;
+    for(i = 0; i < kern->cubeCount; i++){
+        copyCubes(kern->cubes[i], sf->cubes[i]);
     }
 }
 
@@ -346,4 +389,45 @@ void printCube(int* cube){
             printf("%c", intToChar(i));
         }
     }
+}
+
+
+void printCoKernels(CoKernels *cokerns){
+    printf("---------------------------\n");
+    printf("Co-Kernels: \n");
+    printf("\t{");
+    int i;
+    for(i = 0; i < cokerns->cokernCount; i++){
+        printCube(cokerns->cokern[i].cubes);
+        if(i != cokerns->cokernCount-1){
+            printf(", ");
+        }
+    }
+    printf("}\n");
+    printf("---------------------------\n");
+}
+
+void printKernel(Kernel *kern){
+    int i;
+    for(i = 0; i < kern->cubeCount; i++){
+        printCube(kern->cubes[i]);
+        if(i != kern->cubeCount - 1){
+            printf(" + ");
+        }
+    }
+}
+
+void printKernels(Kernels *kerns){
+    printf("---------------------------\n");
+    printf("Kernels: \n");
+    printf("\t{");
+    int i;
+    for(i = 0; i < kerns->kernCount; i++){
+        printKernel(&kerns->kern[i]);
+        if(i < kerns->kernCount -1){
+            printf(", ");
+        }
+    }
+    printf("}\n");
+    printf("---------------------------\n");
 }
