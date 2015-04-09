@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-//#define DEBUG
+#define DEBUG
 
 #define V_X 2
 #define V_1 1
@@ -62,6 +62,9 @@ void logCoKernels(CoKernels *cokerns);
 void printKernels(Kernels *kerns);
 void printCoKernels(CoKernels *cokerns);
 void copyKernToSF(Kernel *kern, SFunc *sf);
+int isLastKernDup(Kernels *kerns);
+int isKernDup(Kernel* kern1, Kernel* kern2);
+int isCubeDup(int* cube1, int* cube2);
 
 
 int main(int argc, char *argv[]){
@@ -195,7 +198,7 @@ void rKernel_allFuncs(Func *f){
         SFunc sf = f->singleFuncs[i];
         sf.numin = f->numin;
         printf("Function %d: \n", i);
-        
+
         rKernel(&sf, kerns, cokerns);
 #ifdef DEBUG
         int j;
@@ -209,6 +212,7 @@ void rKernel_allFuncs(Func *f){
         //we now have the kernels and cokernels
         logKernels(kerns);
         logCoKernels(cokerns);
+
 
         free(kerns);
         free(cokerns);
@@ -225,12 +229,11 @@ void logKernels(Kernels *kerns){
 
 //recursive function to find the kernels
 void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
+    printf("Finding kernels for: \n");
+    printSingleFunc(sf);
     int i, j;
     for(i = 0; i < sf->numin; i++){ //i is the current literal 
         int** cubes = malloc(MAXCUBES * sizeof(int*));
-        for(j = 0; j < MAXCUBES; j++){
-            cubes[j] = (int*) malloc(MAXLITERALS * sizeof(int));
-        }
         int numCubes = getCubesWithLiteral(sf, cubes, i);
         kerns->kern[kerns->kernCount].cubeCount = numCubes;
 #ifdef DEBUG
@@ -242,21 +245,25 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
         printf("\n");
 #endif
         if(numCubes >= 2){ //if inside this loop, we know there's at least a 1 literal co-kernel (the literal itself)
-            int* subset = malloc(MAXLITERALS * sizeof(int));
+            int* subset = calloc(MAXLITERALS, sizeof(int));
             findLargestSubset(cubes, numCubes, subset);
+            
             //the largest subset is a cokernel, add it as such
             int* cokernAddr = cokerns->cokern[cokerns->cokernCount].cubes;
-            copyCubes(subset, cokernAddr);
+            copyCubes(subset, cokernAddr); //adds it directly into the cokern cubes array
             cokerns->cokernCount = cokerns->cokernCount + 1;
 #ifdef DEBUG
             printf("\t\tLargest subset (i.e. cokernel): ");
-            printCube(cokernAddr);
+            printCube(subset);
             printf("\n");
-            printf("Adding kernel: ");
+            printf("\t\t\tFound kernel: ");
 #endif
+
+            //regardless of whether the kernel will be kept, we'll add it into the array
+            //There's no need to make another one.  If it won't be kept, we simply won't incrememnt the kernel count below
             for(j = 0; j < numCubes; j++){
                 int* kernAddr = kerns->kern[kerns->kernCount].cubes[j];
-                subtractCubes(cubes[j], cokernAddr, kernAddr);
+                subtractCubes(cubes[j], subset, kernAddr); //this adds it directly into the kerns cubes array
 #ifdef DEBUG
                 printCube(kernAddr);
                 if(j != numCubes - 1){
@@ -267,16 +274,81 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
 #ifdef DEBUG
             printf("\n");
 #endif
-            kerns->kernCount = kerns->kernCount + 1;
+            if(!isLastKernDup(kerns)){
+                kerns->kernCount = kerns->kernCount + 1;
 
-            //make it recursive here!
-            SFunc *kernSF = calloc(1, sizeof(SFunc));
-            kernSF->numin = sf->numin;
-            copyKernToSF(&kerns->kern[kerns->kernCount-1], kernSF);
-            
-            rKernel(kernSF, kerns, cokerns);
+                //add in the subset
+                //make it recursive here!
+                SFunc *kernSF = calloc(1, sizeof(SFunc));
+                kernSF->numin = sf->numin;
+                copyKernToSF(&kerns->kern[kerns->kernCount-1], kernSF);
+
+                rKernel(kernSF, kerns, cokerns);
+                //free(kernSF);
+            }
+            free(subset);
+        }
+        free(cubes);
+    }
+}
+
+int isLastKernDup(Kernels *kerns){
+    int numKerns = kerns->kernCount;
+    if(numKerns == 0){
+        return 0; //cannot have a duplicate
+    }
+    Kernel *lastKern = &kerns->kern[numKerns];
+    int i;
+    for(i = 0; i < numKerns-1; i++){ //numKerns-1 because we don't count the last one, obviously
+        if(isKernDup(&kerns->kern[i], lastKern)){
+            return 1;
         }
     }
+    return 0; //got here because the kernel is not dupilcated
+}
+
+int isKernDup(Kernel* kern1, Kernel* kern2){
+    int i, j;
+    for(i = 0; i < kern1->cubeCount; i++){
+        int isEqual = 0;
+        for(j = 0; j < kern2->cubeCount; j++){
+            if(isCubeDup(kern1->cubes[i], kern2->cubes[j])){
+                isEqual = 1;
+                break;
+            }
+        }
+        if(!isEqual){
+            return 0; //we know this because the cube for kern1 wasn't found in kern2
+        }
+    }
+    //we've exhausted all of kern1 and manged to find the same cube throughout kern2
+    //would return 1 now but we should do a backward search as well
+    //what if kern1 = ab + ce and kern2 = ab + ce + df
+
+    for(i = 0; i < kern2->cubeCount; i++){
+        int isEqual = 0;
+        for(j = 0; j < kern1->cubeCount; j++){
+            if(isCubeDup(kern1->cubes[i], kern2->cubes[j])){
+                isEqual = 1;
+                break;
+            }
+        }
+        if(!isEqual){
+            return 0; //we know this because the cube for kern1 wasn't found in kern2
+        }
+    }
+
+    return 1; //NOW we know we're done
+}
+
+int isCubeDup(int* cube1, int* cube2){
+    int i;
+    for(i = 0; i < MAXLITERALS; i++){
+        if(cube1[i] != cube2[i]){
+            return 0;   
+        }
+    }
+    return 1; //if we've made it through, that's because every element of the cube is equal
 }
 
 
@@ -332,6 +404,9 @@ int subtractCubes(int* cube1, int* cube2, int* result){
         if(cube1[i] == V_1 && cube2[i] == V_0){
             result[i] = V_1;
             numVals++;
+        }
+        else{
+            result[i] = V_0;
         }
     }
     return numVals;
