@@ -1,2 +1,10 @@
+CC=gcc
+CFLAGS=-Wall -Werror -g 
+SOURCES=kindel_dave_final.c
+EXECUTABLE=final
+
 all:
-	gcc kindel_dave_final.c -Wall -Werror -g -o final
+	$(CC) $(SOURCES) $(CFLAGS) -o $(EXECUTABLE)
+
+clean:
+	rm -f $(EXECUTABLE)
