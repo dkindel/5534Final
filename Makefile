@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall -Werror -g 
+CFLAGS=-lpthread -Wall -Werror -g 
 SOURCES=kindel_dave_final.c
 EXECUTABLE=final
 

@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 //#define DEBUG
 
@@ -11,6 +12,8 @@
 #define MAXFUNCS 5
 #define MAXCUBES 50
 #define MAXLITERALS 50
+
+#define intToChar(i) (char)(((int)'a')+i)
 
 //this a single function
 typedef struct SFunc {
@@ -47,6 +50,13 @@ typedef struct CoKernels {
 } CoKernels;
 
 
+typedef struct WorkerArgs {
+    int tid;
+    Func *f;
+} WorkerArgs;
+
+
+
 Func buildFunc(char*);
 void printFunc(Func* f);
 void printSingleFunc(SFunc *sf);
@@ -57,14 +67,24 @@ void rKernel_allFuncs(Func *f);
 int  getCubesWithLiteral(SFunc *sf, int** cubes, int literal);
 int findLargestSubset(int** cubes, int numCubes, int* subset);
 int subtractCubes(int* cube1, int* cube2, int* result);
-void logKernels(Kernels *kerns);
-void logCoKernels(CoKernels *cokerns);
+void logKernels(Kernels *kerns, int funcNum, int numin);
+void logCoKernels(CoKernels *cokerns, int funcNum, int numin);
+void writeKernelsToFile(FILE *fp, Kernels *kerns, int numin);
+void writeCoKernelsToFile(FILE *fp, CoKernels *cokerns, int numin);
+void writeCube(FILE *fp, int* cube);
 void printKernels(Kernels *kerns);
+void printKernel(Kernel *kern);
 void printCoKernels(CoKernels *cokerns);
 void copyKernToSF(Kernel *kern, SFunc *sf);
+int isLastCoKernDup(CoKernels *cokern);
 int isLastKernDup(Kernels *kerns);
 int isKernDup(Kernel* kern1, Kernel* kern2);
 int isCubeDup(int* cube1, int* cube2);
+void *worker_thread(void *args);
+
+
+pthread_mutex_t mutex;
+
 
 
 int main(int argc, char *argv[]){
@@ -188,48 +208,132 @@ Func buildFunc(char* espName){
 //used to call the recursive function on ALL the functions separately (we're going to do
 //this one at a time)
 void rKernel_allFuncs(Func *f){
+    //set up threading
+    pthread_barrier_t barrier;
+    WorkerArgs *args = (WorkerArgs *) malloc(f->numout * sizeof(WorkerArgs));
+    pthread_t *threads = (pthread_t *) malloc(f->numout * sizeof(pthread_t));
+
+    pthread_barrier_init(&barrier, NULL, f->numout);
+    pthread_mutex_init(&mutex, NULL);
     int i;
     for(i = 0; i < f->numout; i++){
-        //I can't just malloc or work on the stack because c hates me
-        Kernels *kerns = NULL;
-        CoKernels *cokerns = NULL;
-        kerns = (Kernels *) calloc(1, sizeof(Kernels));
-        cokerns = (CoKernels *) calloc(1,sizeof(CoKernels));
-        SFunc sf = f->singleFuncs[i];
-        sf.numin = f->numin;
-        printf("Function %d: \n", i);
-
-        rKernel(&sf, kerns, cokerns);
-#ifdef DEBUG
-        int j;
-        printf("\tCokernels: \n");
-        for(j = 0; j < cokerns->cokernCount; j++){
-            printf("\t\tCoKernel %d: ", j);
-            printCube(cokerns->cokern[j].cubes);
-            printf("\n");
-        }
-#endif
-        //we now have the kernels and cokernels
-        logKernels(kerns);
-        logCoKernels(cokerns);
-
-
-        free(kerns);
-        free(cokerns);
+        args[i].tid = i;
+        args[i].f = f;
+        printf("Creating thread %d\n", args[i].tid);
+        pthread_create(&threads[i], NULL, worker_thread, &args[i]);
     }
+
+    for(i = 0; i < f->numout; i++){
+        pthread_join(threads[i], NULL);
+    }
+    free(args);
+    free(threads);
 }
 
 void *worker_thread(void *args){
-   return NULL; 
+    WorkerArgs *parms = (WorkerArgs*) args;
+    int tid = parms->tid;
+    Func *f = parms->f;
+    //I can't just malloc or work on the stack because c hates me
+    Kernels *kerns = NULL;
+    CoKernels *cokerns = NULL;
+    kerns = (Kernels *) calloc(1, sizeof(Kernels));
+    cokerns = (CoKernels *) calloc(1,sizeof(CoKernels));
+    SFunc sf = f->singleFuncs[tid];
+    sf.numin = f->numin;
+    //printf("Function %d: \n", tid);
+
+    //do work here
+    rKernel(&sf, kerns, cokerns);
+
+    //now add in the main func
+    Kernel mainKern;
+    mainKern.cubeCount = sf.cubeCount;
+    int i, j;
+    for(i = 0; i < sf.cubeCount; i++){
+        for(j = 0; j < MAXCUBES; j++){
+            mainKern.cubes[i][j] = sf.cubes[i][j];
+        }
+    }
+    kerns->kern[kerns->kernCount++] = mainKern;
+
+#ifdef DEBUG
+    int j;
+    printf("\tCokernels: \n");
+    for(j = 0; j < cokerns->cokernCount; j++){
+        printf("\t\tCoKernel %d: ", j);
+        printCube(cokerns->cokern[j].cubes);
+        printf("\n");
+    }
+#endif
+    //we now have the kernels and cokernels
+    pthread_mutex_lock(&mutex);
+    printf("Function %d: \n", tid);
+    logKernels(kerns, tid, f->numin);
+    logCoKernels(cokerns, tid, f->numin);
+    pthread_mutex_unlock(&mutex);
+
+
+    free(kerns);
+    free(cokerns);
+
+    pthread_exit(0);
 }
 
-void logCoKernels(CoKernels *cokerns){
+void logCoKernels(CoKernels *cokerns, int funcNum, int numin){
     printCoKernels(cokerns);
+    char filestr[20];
+    snprintf(filestr, 20, "%s%d%s", "cokernel", funcNum, ".ckn");
+
+    FILE *fp;
+    fp = fopen(filestr, "w+");
+    writeCoKernelsToFile(fp, cokerns, numin);
+    fclose(fp);
 }
 
-void logKernels(Kernels *kerns){
+void logKernels(Kernels *kerns, int funcNum, int numin){
     printKernels(kerns);
+    char filestr[20];
+    snprintf(filestr, 20, "%s%d%s", "kernel", funcNum, ".krn");
+
+    FILE *fp;
+    fp = fopen(filestr, "w+");
+    writeKernelsToFile(fp, kerns, numin);
+    fclose(fp);
 }
+
+void writeKernelsToFile(FILE *fp, Kernels *kerns, int numin){
+    int i, j;
+    for(i = 0; i < kerns->kernCount; i++){
+        Kernel *kern = &kerns->kern[i];
+        for(j = 0; j < kern->cubeCount; j++){
+            writeCube(fp, kern->cubes[j]);
+            if(j != kern->cubeCount - 1){
+                fprintf(fp, " + ");
+            }
+        }
+        fprintf(fp, "\n");
+    }
+}
+
+void writeCoKernelsToFile(FILE *fp, CoKernels *cokerns, int numin){
+    int i;
+    for(i = 0; i < cokerns->cokernCount; i++){
+        writeCube(fp, cokerns->cokern[i].cubes);
+        fprintf(fp, "\n");
+    }
+    fprintf(fp, "1\n");
+}
+
+void writeCube(FILE *fp, int* cube){
+    int i;
+    for(i = 0; i < MAXLITERALS; i++){
+        if(cube[i] == V_1){
+            fprintf(fp, "%c", intToChar(i));
+        }
+    }
+}
+
 
 //recursive function to find the kernels
 void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
@@ -253,11 +357,13 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
         if(numCubes >= 2){ //if inside this loop, we know there's at least a 1 literal co-kernel (the literal itself)
             int* subset = calloc(MAXLITERALS, sizeof(int));
             findLargestSubset(cubes, numCubes, subset);
-            
+
             //the largest subset is a cokernel, add it as such
             int* cokernAddr = cokerns->cokern[cokerns->cokernCount].cubes;
             copyCubes(subset, cokernAddr); //adds it directly into the cokern cubes array
-            cokerns->cokernCount = cokerns->cokernCount + 1;
+            if(!isLastCoKernDup(cokerns)){
+                cokerns->cokernCount = cokerns->cokernCount + 1;
+            }
 #ifdef DEBUG
             printf("\t\tLargest subset (i.e. cokernel): ");
             printCube(subset);
@@ -281,6 +387,9 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
             printf("\n");
 #endif
             if(!isLastKernDup(kerns)){
+#ifdef DEBUG
+                printf("Kernel is not duplicate in list\n");
+#endif
                 kerns->kernCount = kerns->kernCount + 1;
 
                 //add in the subset
@@ -292,10 +401,30 @@ void rKernel(SFunc *sf, Kernels *kerns, CoKernels *cokerns){
                 rKernel(kernSF, kerns, cokerns);
                 free(kernSF);
             }
+#ifdef DEBUG
+            else{
+                printf("Kernel is a duplicate.  Not adding\n");
+            }
+#endif
             free(subset);
         }
         free(cubes);
     }
+}
+
+int isLastCoKernDup(CoKernels *cokerns){
+    int numCoKerns = cokerns->cokernCount;
+    if(numCoKerns == 0){
+        return 0; //cannot have duplicate
+    }
+    CoKernel *lastCoKern = &cokerns->cokern[numCoKerns];
+    int i;
+    for(i = 0; i < numCoKerns; i++){
+        if(isCubeDup(cokerns->cokern[i].cubes, lastCoKern->cubes)){
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int isLastKernDup(Kernels *kerns){
@@ -305,7 +434,7 @@ int isLastKernDup(Kernels *kerns){
     }
     Kernel *lastKern = &kerns->kern[numKerns];
     int i;
-    for(i = 0; i < numKerns-1; i++){ //numKerns-1 because we don't count the last one, obviously
+    for(i = 0; i < numKerns; i++){ //numKerns-1 because we don't count the last one, obviously
         if(isKernDup(&kerns->kern[i], lastKern)){
             return 1;
         }
@@ -314,6 +443,13 @@ int isLastKernDup(Kernels *kerns){
 }
 
 int isKernDup(Kernel* kern1, Kernel* kern2){
+#ifdef DEBUG
+    printf("Comparing kernels: ");
+    printKernel(kern1);
+    printf(" and ");
+    printKernel(kern2);
+    printf("\n");
+#endif
     int i, j;
     for(i = 0; i < kern1->cubeCount; i++){
         int isEqual = 0;
@@ -427,7 +563,6 @@ void copyCubes(int* src, int* dest){
     }
 }
 
-#define intToChar(i) (char)(((int)'a')+i)
 
 void printFunc(Func* f){
     int i, j, k;
@@ -480,10 +615,9 @@ void printCoKernels(CoKernels *cokerns){
     int i;
     for(i = 0; i < cokerns->cokernCount; i++){
         printCube(cokerns->cokern[i].cubes);
-        if(i != cokerns->cokernCount-1){
-            printf(", ");
-        }
+        printf(", ");
     }
+    printf("1"); //add 1 to the list
     printf("}\n");
     printf("---------------------------\n");
 }
